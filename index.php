@@ -26,7 +26,10 @@ include_once("YearClass.php");
 $db = Db::getInstance();
 $link = $db->getConnection();
 
-
+//$sql = "SELECT * FROM people";
+//ExecuteQuery($sql);
+//$sql = "UPDATE history SET person_id = 1 WHERE id = 1000000";
+//ExecuteQuery($sql);
 
 
 $harnage = $link->query("SELECT age, start,end FROM HarnAge")->fetchAll(PDO::FETCH_ASSOC);
@@ -35,63 +38,139 @@ $harnfertilityzero = $link->query("SELECT age, start, end FROM HarnFertility")->
 foreach ($harnfertilityzero as $key => $value) {
 	$harnfertility[$key + 15] = $value;
 }
-$femalenameslist = $link->query("SELECT id, name from firstnames_female order by id")->fetchAll(PDO::FETCH_ASSOC);
-foreach ($femalenameslist as $key => $value) {
-	$femalenames[$key + 1] = $value;
-}
-$malenameslist = $link->query("SELECT id, name from firstnames_male order by id")->fetchAll(PDO::FETCH_ASSOC);
-foreach ($malenameslist as $key => $value) {
-	$malenames[$key + 1] = $value;
-}
+//$femalenameslist = $link->query("SELECT id, name from firstnames_female order by id")->fetchAll(PDO::FETCH_ASSOC);
+//foreach ($femalenameslist as $key => $value) {
+//	$femalenames[$key + 1] = $value;
+//}
+//$malenameslist = $link->query("SELECT id, name from firstnames_male order by id")->fetchAll(PDO::FETCH_ASSOC);
+//foreach ($malenameslist as $key => $value) {
+//	$malenames[$key + 1] = $value;
+//}
 //pr($femalenames);
 //pr($malenames);
 
-
-$link = $db->getConnection();
-$sql = "TRUNCATE TABLE people";
-$link->query($sql);
-$sql = "TRUNCATE TABLE history";
-$link->query($sql);
-
+setData('history', ['person_id', 'action_id', 'year', 'occurrence', 'other_id', 'processed']);
+$actions = [];
+$actions['birthyear'] = [1, 'Born', 'mother_id', 1];
+$actions['marriage'] = [2, 'Married', 'spouse_id', 0];
+$actions['nextchild'] = [3, 'Child', 'child_id', 0];
+$actions['fertility'] = [4, 'Infertility', null, 0];
+$actions['lifespan'] = [5, 'Died', null, 0];
+setData('actions', $actions);
 
 setData('harnage', $harnage);
 setData('harnlifespan', $harnlifespan);
 setData('harnfertility', $harnfertility);
-setData('femalenames', $femalenames);
-setData('malenames', $malenames);
+//setData('femalenames', $femalenames);
+//setData('malenames', $malenames);
 
-$startingpopulation = 10000;
-$currentyear = 0;
+$startingpopulation = 10;
+$maxpopulation = 10000;
+$startyear = 1000;
 $dumpmax = 300;
 
-$sql = "TRUNCATE TABLE people";
-$link->query($sql);
-$sql = "TRUNCATE TABLE history";
-$link->query($sql);
+setData('currentyear', $startyear);
 
-//$link->query("START TRANSACTION");
-$dumpctr = 0;
-$savelist = [];
-for ($ctr = 0; $ctr < ($startingpopulation); $ctr++) {
-	$newperson = CreatePerson();
-	$savelist[] = $newperson;
-	$dumpctr += 1;
-	if ($dumpctr >= $dumpmax) {
-//		echoline("Prepping Dump at $ctr");
-		$sql = buildInsertQuery('people', $savelist);
-//		echoline($sql);
-		$link->query($sql);
-		$dumpctr = 0;
-		$savelist = [];
-		set_time_limit(60);
-	}
-}
-if ($savelist) {
-//	echoline("Prepping Final Dump at $ctr");
-	$sql = buildInsertQuery('people', $savelist);
-//		echoline($sql);
+$start = true;
+if ($start) {
+	$sql = "TRUNCATE TABLE people";
 	$link->query($sql);
-	set_time_limit(60);
+	$sql = "TRUNCATE TABLE history";
+	$link->query($sql);
+
+	for ($ctr = 0; $ctr < $startingpopulation; $ctr++) {
+		$newid = CreateFemale($start);
+	}
+
+//	$dumpctr = 0;
+//	$savelist = [];
+//	for ($ctr = 0; $ctr < ($startingpopulation); $ctr++) {
+//		$newperson = CreateFemale(true);
+//		$savelist[] = $newperson;
+//		$dumpctr += 1;
+//		if ($dumpctr >= $dumpmax) {
+////		echoline("Prepping Dump at $ctr");
+//			$sql = buildInsertQuery('people', $savelist);
+////		echoline($sql);
+//			$link->query($sql);
+//			$dumpctr = 0;
+//			$savelist = [];
+//			set_time_limit(60);
+//		}
+//	}
+//	if ($savelist) {
+////	echoline("Prepping Final Dump at $ctr");
+//		$sql = buildInsertQuery('people', $savelist);
+////		echoline($sql);
+//		$link->query($sql);
+//		set_time_limit(60);
+//	}
+}
+$currentpopulation = $maxpopulation - 30;
+while ($currentpopulation < $maxpopulation) {
+	$nextaction = $link->query("SELECT * FROM history WHERE processed = 0 ORDER BY `year`, action_id, person_id  LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+	if (empty($nextaction)) {
+		break;
+	}
+//	pr($nextaction);
+	setData('currentyear', $nextaction['year']);
+	$actor = $link->query("Select * from people where id = " . $nextaction['person_id'])->fetch(PDO::FETCH_ASSOC);
+//	pr($actor);
+	switch ($nextaction['action_id']) {
+		case 1: // Born
+			//Error, should not have been selected;
+			break;
+		case 2: //Married
+			if ($actor['gender'] == 1) {
+				$spouse = GetMaleSpouse($actor);
+				$sql = "UPDATE people set `spouse_id` = " . $spouse[0] . ", `familyname` = '" . $spouse[1] . "' WHERE id = " . $actor['id'];
+				ExecuteQuery($sql);
+				$sql = "UPDATE history set `other_id` = " . $spouse[0] . ", `processed` = 1 WHERE id = " . $nextaction['id'];
+				ExecuteQuery($sql);
+			}
+			break;
+		case 3: //Child
+			$child_id = CreateChild($actor);
+//			echoline($child_id, "Child was created", true);
+			$sql = "Update history set other_id = $child_id, processed = 1 WHERE id = " . $nextaction['id'];
+			ExecuteQuery($sql);
+			while (mt_rand(1, 100) == 1) {
+				$child_id = CreateChild($actor);
+				$sql = "INSERT INTO history set "
+						. "person_id = " . $nextaction['person_id'] . ", "
+						. "action_id = " . $nextaction['person_id'] . ", "
+						. "year = " . $nextaction['year'] . ", "
+						. "occurrence = " . $nextaction['occurrence'] . ", "
+						. "other_id = " . $child_id . ", "
+						. "processed = 1";
+				ExecuteQuery($sql);
+			}
+			$age = getData('currentyear') - $actor['birthyear'];
+			$lastchance = min($actor['fertility'], $actor['lifespan']) - $actor['birthyear'];
+			$nextchild = GetNextChildAge($age, $lastchance);
+			$sql = "UPDATE people SET nextchild = $nextchild WHERE id = " . $actor['id'];
+			ExecuteQuery($sql);
+			break;
+		case 4: //Infertile
+			$sql = "UPDATE people SET nextchild = 0, infertile = 1 WHERE id = " . $actor['id'];
+			ExecuteQuery($sql);
+			$sql = "Update history set processed = 1 WHERE id = " . $nextaction['id'];
+			ExecuteQuery($sql);
+			break;
+		case 5: // Deceased
+			$sql = "UPDATE people SET deceased = 1 WHERE id = " . $actor['id'];
+			ExecuteQuery($sql);
+			$sql = "Update history set processed = 1 WHERE id = " . $nextaction['id'];
+			ExecuteQuery($sql);
+			break;
+		default:
+			//Error, should have a value
+			break;
+	}
+
+
+	$currentpopulation += 1;
+//	$currentpopulation = $link->query("SELECT count(*) as cid from people where deceased = 0")->fetch(PDO::FETCH_ASSOC)['cid'];
 }
 
 //$link->query("COMMIT");

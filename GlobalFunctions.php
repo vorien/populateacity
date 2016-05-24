@@ -1,5 +1,88 @@
 <?php
 
+function GetIdOrNull($array, $key) {
+	if (array_key_exists($key, $array)) {
+		return $array[$key];
+	} else {
+		return "'null'";
+	}
+}
+
+function CreateHistory($person) {
+	$sql = "INSERT INTO `history` (`" . implode("`,`", getData('history')) . "`) VALUES ";
+	$values = [];
+	$actions = getData('actions');
+	foreach ($actions as $key => $value) {
+		$year = $other = "'null'";
+		if (array_key_exists($key, $person)) {
+			$year = $person[$key];
+			if (array_key_exists($value[2], $person)) {
+				$other = $person[$value[2]];
+				$processed = 1;
+			} else {
+				$processed = $actions[$key][3];
+			}
+			$values[] = "(" . $person['id'] . ", " . $actions[$key][0] . ", " . $year . ", '" . $actions[$key][1] . "', " . $other . "," . $processed . ")";
+		}
+	}
+	if (!empty($values)) {
+		$sql .= implode(",", $values);
+//		echoline($sql, "adding history");
+		if (!ExecuteQuery($sql)) {
+			echoline("History inserts failed");
+			return false;
+		}
+	} else {
+		// No history to add
+	}
+	return true;
+}
+
+function ExecuteQuery($sql, $type = null) {
+	if (strlen(trim($sql)) < 10) {
+		die("No sql query attached");
+		return false;
+	}
+
+	if (!$type) {
+		$type = strtok($sql, " ");
+	}
+
+	$db = Db::getInstance();
+	$link = $db->getConnection();
+
+	$returnval = $link->query($sql);
+	if ($link->errorinfo()[0] != '00000') {
+		echoline($sql, "Query with error");
+		pr($link->errorinfo());
+		return false;
+	}
+
+	if ($returnval->rowCount() === 0 || $returnval === FALSE) {
+		return false;
+	} else {
+		switch (strtoupper($type)) {
+			case "SELECT":
+				return $returnval->fetchAll(PDO::FETCH_ASSOC);
+				break;
+			case "INSERT":
+			case "UPDATE":
+				return $link->lastInsertId();
+				break;
+			default:
+				die("Unknown query type");
+		}
+	}
+}
+
+function Get2d6ExplodeOnce() {
+	$d1 = mt_rand(1, 6);
+	$d2 = mt_rand(1, 6);
+	$d3 = $d1 == 6 ? mt_rand(1, 6) : 0;
+	$d4 = $d2 == 6 ? mt_rand(1, 6) : 0;
+	return $d1 + $d2 + $d3 + $d4;
+}
+
 function buildInsertQuery($table, $records) {
 	if (empty($records)) {
 		return false;
@@ -20,25 +103,37 @@ function buildInsertQuery($table, $records) {
 	return $sql;
 }
 
-function getRandomFirstName($gender){
+function getRandomFirstName($gender) {
 	$tblname = $gender ? 'femalenames' : 'malenames';
 	$table = getData($tblname);
 	$max = getTableRange($tblname, 'id')[1];
 //	echoline($max, 'max');
 	$randval = mt_rand(1, $max);
-	echoline($randval, 'randval');
+//	echoline($randval, 'randval');
 //	pr($table[$randval]);
 	$name = $table[$randval]['name'];
 	return $name;
 }
 
 function getAgeFromRoll($table, $minmax = []) {
-	if (!$minmax) {
-		$minmax = getTableRange($table, 'age');
+	$agerange = getTableRange($table, 'age');
+//	pr($agerange);
+	if (empty($minmax)) {
+		$min = $agerange[0];
+		$max = $agerange[1];
+	} else {
+		$min = max($minmax[0], $agerange[0]);
+		$max = min($minmax[1], $agerange[1]);
 	}
-	$lowroll = getData($table)[$minmax[0]]['start'];
-	$highroll = getData($table)[$minmax[1]]['end'];
+	if ($min > $max) {
+		return false;
+	}
+	$lowroll = getData($table)[$min]['start'];
+	$highroll = getData($table)[$max]['end'];
+//	echoline($lowroll, "lowroll");
+//	echoline($highroll, "highroll");
 	$roll = mt_rand($lowroll, $highroll);
+//	echoline($roll, "roll");
 	foreach (getData($table) as $key => $value) {
 		if ($roll >= $value['start'] && $roll <= $value['end']) {
 			return $value['age'];
@@ -48,6 +143,7 @@ function getAgeFromRoll($table, $minmax = []) {
 }
 
 function getTableRange($table, $field) {
+//	echoline($table, "getTableRange - table");
 	$tbl = getData($table);
 	ksort($tbl);
 	$min = array_shift($tbl)[$field];
@@ -65,22 +161,32 @@ function History($id, $year, $occurrence, $other_id = "null") {
 //		$this->link->query($sql);
 }
 
-function GetClosestMaleToAge($age, $allowmarried = false) {
-	global $people;
-	$closest = null;
-	foreach ($people as $person) {
-		if ($person->gender != 0 && $person->deceased == 0 && (!$person->spouse_id || $allowmarried)) {
-
-			if ($closest === null || abs($age - $closest) > abs($person->age - $age)) {
-				$closest = $person->id;
-			}
-		}
+function GetClosestMaleToAge($array) {
+//	echoline("GetClosestMaleToAge");
+	if (!isset($array['birthyear'])) {
+		return false;
 	}
-	return $closest;
+	$defaults = ['offset' => 4, 'lifespan' => 0, 'allowmarried' => false];
+	$parameters = array_merge($defaults, $array);
+//	pr($parameters);
+	$sql = "SELECT   id, birthyear, gender, ABS(birthyear - " . $parameters['birthyear'] . ") AS distance_from_test FROM people";
+	$sql .= " WHERE gender = 0";
+	if (!$parameters['allowmarried']) {
+		$sql .= " AND spouse_id IS NULL";
+	}
+	$sql .=" and birthyear > 15 - " . getData('currentyear') . " and lifespan >= " . $parameters['lifespan'];
+	$sql .= " HAVING distance_from_test < " . $parameters['offset'];
+	$sql .= " ORDER BY distance_from_test";
+	$sql .= " LIMIT 1;";
+	if ($closest = ExecuteQuery($sql)) {
+		$id = $closest[0]['id'];
+		return $id;
+	}
+	return false;
 }
 
 // Convenience Functions
-function pr($array, $debug = false) {
+function pr($array, $debug = true) {
 	$output = "<pre>";
 	$output .= print_r($array, true);
 	$output .= "</pre>";
