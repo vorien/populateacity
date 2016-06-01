@@ -64,8 +64,8 @@ setData('harnfertility', $harnfertility);
 //setData('femalenames', $femalenames);
 //setData('malenames', $malenames);
 
-$startingpopulation = 10;
-$maxpopulation = 10000;
+$startingpopulation = 100;
+$maxpopulation = 1000;
 $startyear = 1000;
 $dumpmax = 300;
 
@@ -81,96 +81,87 @@ if ($start) {
 	for ($ctr = 0; $ctr < $startingpopulation; $ctr++) {
 		$newid = CreateFemale($start);
 	}
-
-//	$dumpctr = 0;
-//	$savelist = [];
-//	for ($ctr = 0; $ctr < ($startingpopulation); $ctr++) {
-//		$newperson = CreateFemale(true);
-//		$savelist[] = $newperson;
-//		$dumpctr += 1;
-//		if ($dumpctr >= $dumpmax) {
-////		echoline("Prepping Dump at $ctr");
-//			$sql = buildInsertQuery('people', $savelist);
-////		echoline($sql);
-//			$link->query($sql);
-//			$dumpctr = 0;
-//			$savelist = [];
-//			set_time_limit(60);
-//		}
-//	}
-//	if ($savelist) {
-////	echoline("Prepping Final Dump at $ctr");
-//		$sql = buildInsertQuery('people', $savelist);
-////		echoline($sql);
-//		$link->query($sql);
-//		set_time_limit(60);
-//	}
 }
-$currentpopulation = $maxpopulation - 30;
-while ($currentpopulation < $maxpopulation) {
-	$nextaction = $link->query("SELECT * FROM history WHERE processed = 0 ORDER BY `year`, action_id, person_id  LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-	if (empty($nextaction)) {
-		break;
-	}
+
+$sql = "SELECT count(`id`) as cid FROM people WHERE deceased = 0";
+if ($populationcount = ExecuteQuery($sql)) {
+	$currentpopulation = $populationcount[0]['cid'];
+	echoline($currentpopulation, "Starting population");
+	while ($currentpopulation < $maxpopulation) {
+		$nextaction = $link->query("SELECT * FROM history WHERE processed = 0 ORDER BY `year`, action_id, person_id  LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+		if (empty($nextaction)) {
+			echoline("Out of actions");
+			break;
+		}
 //	pr($nextaction);
-	setData('currentyear', $nextaction['year']);
-	$actor = $link->query("Select * from people where id = " . $nextaction['person_id'])->fetch(PDO::FETCH_ASSOC);
+		setData('currentyear', $nextaction['year']);
+		$actor = $link->query("Select * from people where id = " . $nextaction['person_id'])->fetch(PDO::FETCH_ASSOC);
 //	pr($actor);
-	switch ($nextaction['action_id']) {
-		case 1: // Born
-			//Error, should not have been selected;
-			break;
-		case 2: //Married
-			if ($actor['gender'] == 1) {
-				$spouse = GetMaleSpouse($actor);
-				$sql = "UPDATE people set `spouse_id` = " . $spouse[0] . ", `familyname` = '" . $spouse[1] . "' WHERE id = " . $actor['id'];
+		switch ($nextaction['action_id']) {
+			case 1: // Born
+				//Error, should not have been selected;
+				break;
+			case 2: //Married
+				if ($actor['gender'] == 1) {
+					$spouse = GetMaleSpouse($actor);
+					$sql = "UPDATE people set `spouse_id` = " . $spouse[0] . ", `familyname` = '" . $spouse[1] . "' WHERE id = " . $actor['id'];
+					ExecuteQuery($sql);
+					$sql = "UPDATE history set `other_id` = " . $spouse[0] . ", `processed` = 1 WHERE id = " . $nextaction['id'];
+					ExecuteQuery($sql);
+				}
+				break;
+			case 3: //Child
+				if ($child_id = CreateChild($actor)) {
+					$sql = "Update history set other_id = $child_id, processed = 1 WHERE id = " . $nextaction['id'];
+					ExecuteQuery($sql);
+					while (mt_rand(1, 100) == 1) {
+						if ($child_id = CreateChild($actor)) {
+							$sql = "INSERT INTO history set "
+									. "person_id = " . $nextaction['person_id'] . ", "
+									. "action_id = " . $nextaction['person_id'] . ", "
+									. "year = " . getData('currentyear') . ", "
+									. "occurrence = '" . $nextaction['occurrence'] . "', "
+									. "other_id = " . $child_id . ", "
+									. "processed = 1";
+							ExecuteQuery($sql);
+						} else {
+							die("Unable to create a twin/triplet");
+						}
+					}
+					$age = getData('currentyear') - $actor['birthyear'];
+					$lastchance = min($actor['fertility'], $actor['lifespan']) - $actor['birthyear'];
+					$nextchild = GetNextChildAge($age, $lastchance);
+					$sql = "UPDATE people SET nextchild = $nextchild WHERE id = " . $actor['id'];
+					ExecuteQuery($sql);
+				} else {
+					die("Unable to create a new child");
+				}
+				break;
+			case 4: //Infertile
+				$sql = "UPDATE people SET nextchild = 0, infertile = 1 WHERE id = " . $actor['id'];
 				ExecuteQuery($sql);
-				$sql = "UPDATE history set `other_id` = " . $spouse[0] . ", `processed` = 1 WHERE id = " . $nextaction['id'];
+				$sql = "Update history set processed = 1 WHERE id = " . $nextaction['id'];
 				ExecuteQuery($sql);
-			}
-			break;
-		case 3: //Child
-			$child_id = CreateChild($actor);
-//			echoline($child_id, "Child was created", true);
-			$sql = "Update history set other_id = $child_id, processed = 1 WHERE id = " . $nextaction['id'];
-			ExecuteQuery($sql);
-			while (mt_rand(1, 100) == 1) {
-				$child_id = CreateChild($actor);
-				$sql = "INSERT INTO history set "
-						. "person_id = " . $nextaction['person_id'] . ", "
-						. "action_id = " . $nextaction['person_id'] . ", "
-						. "year = " . $nextaction['year'] . ", "
-						. "occurrence = " . $nextaction['occurrence'] . ", "
-						. "other_id = " . $child_id . ", "
-						. "processed = 1";
+				break;
+			case 5: // Deceased
+				$sql = "UPDATE people SET deceased = 1 WHERE id = " . $actor['id'];
 				ExecuteQuery($sql);
-			}
-			$age = getData('currentyear') - $actor['birthyear'];
-			$lastchance = min($actor['fertility'], $actor['lifespan']) - $actor['birthyear'];
-			$nextchild = GetNextChildAge($age, $lastchance);
-			$sql = "UPDATE people SET nextchild = $nextchild WHERE id = " . $actor['id'];
-			ExecuteQuery($sql);
-			break;
-		case 4: //Infertile
-			$sql = "UPDATE people SET nextchild = 0, infertile = 1 WHERE id = " . $actor['id'];
-			ExecuteQuery($sql);
-			$sql = "Update history set processed = 1 WHERE id = " . $nextaction['id'];
-			ExecuteQuery($sql);
-			break;
-		case 5: // Deceased
-			$sql = "UPDATE people SET deceased = 1 WHERE id = " . $actor['id'];
-			ExecuteQuery($sql);
-			$sql = "Update history set processed = 1 WHERE id = " . $nextaction['id'];
-			ExecuteQuery($sql);
-			break;
-		default:
-			//Error, should have a value
-			break;
-	}
+				$sql = "Update history set processed = 1 WHERE id = " . $nextaction['id'];
+				ExecuteQuery($sql);
+				break;
+			default:
+				//Error, should have a value
+				break;
+		}
 
 
-	$currentpopulation += 1;
+		$currentpopulation += 1;
+		echoline($currentpopulation, "Current population: ");
 //	$currentpopulation = $link->query("SELECT count(*) as cid from people where deceased = 0")->fetch(PDO::FETCH_ASSOC)['cid'];
+	}
+	echoline($maxpopulation, "Maximum population reached");
+} else {
+	echoline("no surviving population");
 }
 
 //$link->query("COMMIT");

@@ -2,19 +2,26 @@
 <?php
 
 function GetMaleSpouse($person) {
+	echoline("GetMaleSpouse");
 	$spouse = [];
 	$spouse['marriage'] = getData('currentyear');
 	$spouse['spouse_id'] = $person['id'];
 	$gender = 0;
 	$spouse['birthyear'] = $person['birthyear'] + Get2d6ExplodeOnce() - 4;
-	if ($id = GetClosestMaleToAge(['birthyear' => $spouse['birthyear']])) {
+	if ($closest = GetClosestMaleToAge(['birthyear' => $spouse['birthyear']])) {
+//		pr($closest);
+		$id = $closest['id'];
+		$spouse['id'] = $id;
+		$familyname = $closest['familyname'];
+//		echoline($id, "Spouse found");
 		CreateHistory($spouse);
 		$sql = "UPDATE people set `spouse_id` = " . $person['id'] . " WHERE id = $id";
 		if (!ExecuteQuery($sql)) {
+			echoline($sql, "sql", true);
 			echoline("Update spouse with person id failed");
 		}
 	} else {
-//		echoline("Create New Spouse Here");
+		echoline("Create New Spouse Here");
 		if (!empty($person['nextchild'])) {
 			$minage = $person['nextchild'] - $spouse['birthyear'];
 		} else {
@@ -24,7 +31,11 @@ function GetMaleSpouse($person) {
 		$sql = "SELECT GetRandomFamilyName() AS familyname FROM people LIMIT 1";
 		if ($result = ExecuteQuery($sql)) {
 			$familyname = $result[0]['familyname'];
+			$spouse['familyname'] = $familyname;
 //			echoline($familyname);
+		}else{
+			echoline("Unable select a random family name");
+			pr($result);
 		}
 		$sql = "INSERT INTO people (`familyname`,`gender`,`birthyear`,`marriage`,`spouse_id`,`lifespan`) VALUES ";
 		$sql .= "('$familyname',0," . $spouse['birthyear'] . "," . getData('currentyear') . "," . $person['id'] . "," . $spouse['lifespan'] . ")";
@@ -36,10 +47,21 @@ function GetMaleSpouse($person) {
 			echoline("Query failed with no information", "", true);
 		}
 	}
+	if(empty($id)){
+//		echoline($sql, "sql", true);
+		pr($person);
+		die("id not set in GetMaleSpouse");
+	}
+	if(empty($familyname)){
+//		echoline($sql, "sql", true);
+		pr($person);
+		die("familyname not set in GetMaleSpouse");
+	}
 	return([$id, $familyname]);
 }
 
 function CreateFemale($start = false) {
+	echoline("CreateFemale");
 	$db = Db::getInstance();
 	$link = $db->getConnection();
 	$age = getAgeFromRoll('harnage', $start ? [15, 20] : []);
@@ -97,20 +119,20 @@ function GetInfertility($age, $lifespan, $force = false) {
 }
 
 function CreateChild($mother) {
+	echoline("CreateChild");
 	$child = [];
 	$child['gender'] = mt_rand(0, 1);
 	$child['mother_id'] = $mother['id'];
 	$child['birthyear'] = getData('currentyear');
-	$child['birthyear'] = 0;
-	if ($father_id = GetFatherID($mother)) {
-		$child['father_id'] = $father_id;
+	if ($father = GetFatherID($mother)) {
+		$child['father_id'] = $father['id'];
 		$bastard = 1;
 	} else {
 		$child['father_id'] = $mother['spouse_id'];
 		$child['familyname'] = $mother['familyname'];
 	}
 //	echoline("Father Selected");
-	$child['lifespan'] = getAgeFromRoll('harnlifespan');
+	$child['lifespan'] = getAgeFromRoll('harnlifespan') + $child['birthyear'];
 //	pr($child);
 	if ($child['gender'] == 1) {
 		if ($child['fertility'] = GetInfertility($child['birthyear'], $child['lifespan'])) {
@@ -123,7 +145,7 @@ function CreateChild($mother) {
 			unset($child['fertility']);
 		}
 	}
-
+//	pr($child);
 	foreach ($child as $key => $value) {
 		$columns[] = $key;
 		$values[] = $value;

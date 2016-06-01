@@ -9,6 +9,15 @@ function GetIdOrNull($array, $key) {
 }
 
 function CreateHistory($person) {
+	echoline("CreateHistory");
+
+	$checkfields = ['id', 'birthyear', 'lifespan'];
+	foreach ($checkfields as $field) {
+		if (empty($person[$field])) {
+			pr($person);
+			die("CreateHistory field $field not set correctly");
+		}
+	}
 	$sql = "INSERT INTO `history` (`" . implode("`,`", getData('history')) . "`) VALUES ";
 	$values = [];
 	$actions = getData('actions');
@@ -28,6 +37,9 @@ function CreateHistory($person) {
 	if (!empty($values)) {
 		$sql .= implode(",", $values);
 //		echoline($sql, "adding history");
+//		if($actions[$key] == 'Child'){
+//			echoline($sql, "Adding nextchild to history");
+//		}
 		if (!ExecuteQuery($sql)) {
 			echoline("History inserts failed");
 			return false;
@@ -66,8 +78,10 @@ function ExecuteQuery($sql, $type = null) {
 				return $returnval->fetchAll(PDO::FETCH_ASSOC);
 				break;
 			case "INSERT":
-			case "UPDATE":
 				return $link->lastInsertId();
+				break;
+			case "UPDATE":
+				return true;
 				break;
 			default:
 				die("Unknown query type");
@@ -162,14 +176,14 @@ function History($id, $year, $occurrence, $other_id = "null") {
 }
 
 function GetClosestMaleToAge($array) {
-//	echoline("GetClosestMaleToAge");
+	echoline("GetClosestMaleToAge");
 	if (!isset($array['birthyear'])) {
 		return false;
 	}
 	$defaults = ['offset' => 4, 'lifespan' => 0, 'allowmarried' => false];
 	$parameters = array_merge($defaults, $array);
 //	pr($parameters);
-	$sql = "SELECT   id, birthyear, gender, ABS(birthyear - " . $parameters['birthyear'] . ") AS distance_from_test FROM people";
+	$sql = "SELECT   id, birthyear, gender, familyname, ABS(birthyear - " . $parameters['birthyear'] . ") AS distance_from_test FROM people";
 	$sql .= " WHERE gender = 0";
 	if (!$parameters['allowmarried']) {
 		$sql .= " AND spouse_id IS NULL";
@@ -179,8 +193,7 @@ function GetClosestMaleToAge($array) {
 	$sql .= " ORDER BY distance_from_test";
 	$sql .= " LIMIT 1;";
 	if ($closest = ExecuteQuery($sql)) {
-		$id = $closest[0]['id'];
-		return $id;
+		return $closest[0];
 	}
 	return false;
 }
